@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>茶園巡檢控管中心</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#f6f7f4; --card:#ffffff; --ink:#1f2a1f; --quiet:#5f6b5f; --line:#dfe5dc;
+          --green:#2f7d32; --amber:#c98a00; --red:#c62828; --blue:#1565c0; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif; }
+  header { padding:16px 20px; display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; }
+  h1 { font-size:20px; margin:0; }
+  .sub { color:var(--quiet); font-size:13px; }
+  main { padding:0 16px 24px; display:grid; gap:16px; grid-template-columns: repeat(12, 1fr); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; min-width:0; }
+  .card h2 { font-size:15px; margin:0 0 10px; }
+  .span4 { grid-column: span 4; } .span6 { grid-column: span 6; } .span8 { grid-column: span 8; } .span12 { grid-column: span 12; }
+  @media (max-width: 900px) { .span4,.span6,.span8 { grid-column: span 12; } }
+  .kpis { display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; }
+  @media (max-width: 600px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+  .kpi { border:1px solid var(--line); border-radius:8px; padding:10px; }
+  .kpi b { display:block; font-size:24px; }
+  .kpi span { color:var(--quiet); font-size:12px; }
+  #alert { display:none; background:#fdecea; border:1px solid #f5c2c0; color:var(--red);
+           border-radius:10px; padding:10px 14px; grid-column: span 12; font-weight:600; }
+  #map { height:300px; border-radius:8px; }
+  .grid { display:grid; gap:6px; }
+  .cell { border-radius:6px; padding:8px 4px; text-align:center; font-size:13px; color:#fff; }
+  .rowlabel { font-size:12px; color:var(--quiet); align-self:center; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:left; white-space:nowrap; }
+  .tablewrap { overflow-x:auto; max-height:320px; }
+  select, button { font:inherit; padding:6px 10px; border-radius:6px; border:1px solid var(--line); background:#fff; }
+  button { cursor:pointer; }
+  .tag { padding:2px 8px; border-radius:10px; color:#fff; font-size:12px; }
+  /* ---- 控管區 ---- */
+  .state { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+  .dot { width:12px; height:12px; border-radius:50%; background:#9aa39a; flex:none; }
+  .bigstate { font-size:24px; font-weight:700; }
+  .label { color:var(--quiet); font-size:14px; min-height:20px; }
+  .bar { height:10px; background:#e7ece5; border-radius:5px; overflow:hidden; margin:10px 0 4px; }
+  .bar i { display:block; height:100%; width:0; background:var(--green); transition:width .4s; }
+  .facts { display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; margin-top:10px; }
+  .facts div { border:1px solid var(--line); border-radius:8px; padding:8px; }
+  .facts b { display:block; font-size:18px; }
+  .facts span { color:var(--quiet); font-size:12px; }
+  .ctrl { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+  .ctrl button { border:0; color:#fff; padding:9px 18px; font-weight:600; }
+  .ctrl .go { background:var(--green); } .ctrl .stop { background:var(--red); }
+  .ctrl button:disabled { opacity:.45; cursor:not-allowed; }
+  #cmdNote { font-size:13px; color:var(--amber); min-height:18px; margin-top:6px; }
+  .result { margin-top:12px; border-radius:10px; padding:14px; color:#fff; text-align:center; background:#9aa39a; }
+  .result b { display:block; font-size:30px; }
+  .result span { font-size:13px; opacity:.95; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>南投特產病蟲害巡檢控管中心</h1>
+    <div class="sub" id="status">讀取中…</div>
+  </div>
+  <div>
+    <select id="gardenSel"><option value="">全部茶園</option></select>
+    <button id="csvBtn">匯出 CSV</button>
+  </div>
+</header>
+<main>
+  <div id="alert"></div>
+
+  <!-- 巡檢車（mBot2） -->
+  <section class="card span6">
+    <h2>巡檢車 mBot2（<span id="carName"></span>）</h2>
+    <div class="state"><span class="dot" id="carDot"></span><span class="bigstate" id="carState">讀取中…</span></div>
+    <div class="label" id="carLabel"></div>
+    <div class="bar"><i id="carBar"></i></div>
+    <div class="sub" id="carProgress">—</div>
+    <div class="facts">
+      <div><b id="carSpray">0</b><span>本趟噴灑</span></div>
+      <div><b id="carRuns">0</b><span>累計巡檢趟數</span></div>
+      <div><b id="carSeen">—</b><span>最後回報</span></div>
+    </div>
+    <div class="ctrl">
+      <button class="go" id="btnStart">▶ 開始巡檢</button>
+      <button class="stop" id="btnStop">■ 停止巡檢</button>
+    </div>
+    <div id="cmdNote"></div>
+    <div class="sub" id="linkNote">連線中…</div>
+  </section>
+
+  <!-- 樹莓派（辨識） -->
+  <section class="card span6">
+    <h2>樹莓派 AI 辨識（<span id="piName"></span>）</h2>
+    <div class="state"><span class="dot" id="piDot"></span><span class="bigstate" id="piState">讀取中…</span></div>
+    <div class="label" id="piLabel"></div>
+    <div class="result" id="lastResult"><b>—</b><span>尚無辨識結果</span></div>
+    <div class="facts">
+      <div><b id="piToday">0</b><span>今日辨識站次</span></div>
+      <div><b id="piTodaySpray">0</b><span>今日噴灑</span></div>
+      <div><b id="piSeen">—</b><span>最後回報</span></div>
+    </div>
+  </section>
+
+  <section class="card span12">
+    <div class="kpis">
+      <div class="kpi"><b id="kStations">0</b><span>巡檢站次</span></div>
+      <div class="kpi"><b id="kDisease">0</b><span>發現病斑</span></div>
+      <div class="kpi"><b id="kSpray">0</b><span>定向噴灑</span></div>
+      <div class="kpi"><b id="kRate">0%</b><span>噴灑比例（相對全面噴灑）</span></div>
+    </div>
+  </section>
+  <section class="card span6"><h2>茶園地圖（圓越大病斑越多）</h2><div id="map"></div></section>
+  <section class="card span6"><h2>茶園內病斑熱力圖（最近一次巡檢）</h2><div id="heat"></div>
+    <p class="sub">R＝去程巡檢側、L＝回程巡檢側；綠＝無感染、黃＝輕微、橘＝普通、紅＝嚴重、灰＝不確定</p></section>
+  <section class="card span12"><h2>病斑數量趨勢（每小時）</h2><div style="height:220px"><canvas id="trend"></canvas></div></section>
+  <section class="card span12"><h2>辨識紀錄（樹莓派上傳）</h2><div class="tablewrap"><table id="tbl"></table></div></section>
+  <section class="card span12"><h2>巡檢車出勤紀錄</h2><div class="tablewrap"><table id="runTbl"></table></div></section>
+</main>
+
+<script>
+// ===================== 設定 =====================
+const Q = new URLSearchParams(location.search);
+const DB_URL = Q.get("db") || "https://skhstest-8ffbd-default-rtdb.asia-southeast1.firebasedatabase.app";
+const DEVICE = Q.get("device") || "mbot2-01";         // 要和 mBot2 程式的 DEVICE 相同
+const PI = Q.get("pi") || "pi-01";                    // 要和樹莓派程式的 DEVICE 相同
+const MQTT_URL = Q.get("mqtt") || "wss://broker.emqx.io:8084/mqtt";
+const TOPIC = Q.get("topic") || "nttea/skjhs/mbot2";  // 要和 mBot2 程式的 TOPIC 相同
+const REFRESH_MS = 10000;
+const CAR_ONLINE_SEC = 45, PI_ONLINE_SEC = 60;        // 超過幾秒沒回報就顯示離線
+const DEMO = Q.has("demo");                           // 網址加 ?demo 看示範畫面
+
+const COLORS = { none: "#2f7d32", low: "#c9b400", medium: "#e08a00", high: "#c62828", unsure: "#8a948a" };
+const LEVEL = { none: "無感染", low: "輕微", medium: "普通", high: "嚴重" };
+const CAR_STATE = { idle: "待命中", scan: "起點準備", moving: "巡檢中", done: "巡檢完成", stopped: "已中止" };
+const PI_STATE = { ready: "準備好了", waiting: "等待出發", moving: "車子移動中", inspecting: "辨識中", offline: "程式已結束" };
+const CAR = `${DB_URL}/mbot2/${DEVICE}`;
+const $ = id => document.getElementById(id);
+
+let map, layer, chart, all = [], gardens = {};
+let carStatus = null, carRuns = {}, piStatus = null, pendingCmd = null, mq = null;
+$("carName").textContent = DEVICE;
+$("piName").textContent = PI;
+
+const resultText = r => r.level === "unsure" ? "不確定" : (LEVEL[r.severity] || r.severity || "—");
+const resultColor = r => r.level === "unsure" ? COLORS.unsure : (COLORS[r.severity] || "#999");
+const isSick = r => r.level !== "unsure" && r.severity && r.severity !== "none";
+function ago(t) {
+  if (!t) return "—";
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  return s < 60 ? s + " 秒前" : s < 3600 ? Math.round(s / 60) + " 分前" : new Date(t).toLocaleString("zh-TW");
+}
+
+// ===================== 辨識資料（樹莓派寫入 /detections） =====================
+async function load() {
+  try {
+    if (!DEMO) {
+      const [det, gar] = await Promise.all([
+        fetch(`${DB_URL}/detections.json?orderBy=${encodeURIComponent('"$key"')}&limitToLast=500`).then(r => r.json()),
+        fetch(`${DB_URL}/gardens.json`).then(r => r.json())]);
+      if (det && det.error) throw new Error(det.error);
+      all = Object.values(det || {}).filter(r => r && r.time).sort((a, b) => a.time - b.time);
+      gardens = gar || {};
+    }
+    $("status").textContent = (DEMO ? "示範資料｜" : "") + "最後更新 " + new Date().toLocaleTimeString("zh-TW");
+    fillGardenSelect(); render();
+  } catch (e) {
+    $("status").textContent = "讀取失敗：請確認 DB_URL 與資料庫規則（" + e.message + "）";
+  }
+}
+
+function fillGardenSelect() {
+  const sel = $("gardenSel"), cur = sel.value;
+  const ids = [...new Set(all.map(r => r.garden_id))];
+  sel.innerHTML = '<option value="">全部茶園</option>' +
+    ids.map(id => `<option value="${id}">${(all.find(r => r.garden_id === id) || {}).garden || id}</option>`).join("");
+  sel.value = ids.includes(cur) ? cur : "";
+}
+const rows = () => { const g = $("gardenSel").value; return g ? all.filter(r => r.garden_id === g) : all; };
+
+function render() {
+  const data = rows(), sick = data.filter(isSick);
+  $("kStations").textContent = data.length;
+  $("kDisease").textContent = sick.length;
+  $("kSpray").textContent = data.filter(r => r.sprayed).length;
+  $("kRate").textContent = data.length ? Math.round(100 * data.filter(r => r.sprayed).length / data.length) + "%" : "0%";
+
+  const recent = sick.filter(r => ["medium", "high"].includes(r.severity) && Date.now() - r.time < 600e3);
+  const al = $("alert");
+  if (recent.length) {
+    const r = recent[recent.length - 1];
+    al.style.display = "block";
+    al.textContent = `⚠ 預警：${r.garden} ${r.side}${r.station}（${r.trip}）發現「${LEVEL[r.severity]}」病斑，已定向噴灑`;
+  } else al.style.display = "none";
+
+  drawMap(data); drawHeat(data); drawTrend(sick); drawTable(data); renderPi(); renderCar();
+}
+
+function drawMap(data) {
+  if (!window.L) return;
+  if (!map) {
+    map = L.map("map").setView([23.83, 120.65], 12);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(map);
+    layer = L.layerGroup().addTo(map);
+  }
+  layer.clearLayers();
+  const pts = [];
+  Object.entries(gardens).forEach(([id, g]) => {
+    if (g.lat == null) return;
+    const n = data.filter(r => r.garden_id === id && isSick(r)).length;
+    pts.push([g.lat, g.lng]);
+    L.circleMarker([g.lat, g.lng], { radius: 8 + n * 3, color: n ? COLORS.high : COLORS.none, fillOpacity: 0.45 })
+      .bindPopup(`<b>${g.name}</b><br>病斑 ${n} 筆`).addTo(layer);
+  });
+  if (pts.length) map.fitBounds(pts, { maxZoom: 15, padding: [30, 30] });
+}
+
+function drawHeat(data) {
+  const box = $("heat");
+  if (!data.length) { box.innerHTML = '<p class="sub">尚無資料</p>'; return; }
+  const last = data[data.length - 1];
+  const run = data.filter(r => r.garden_id === last.garden_id && last.time - r.time < 300e3);
+  const n = Math.max(3, ...run.map(r => r.station || 0));
+  let html = `<div class="grid" style="grid-template-columns: 40px repeat(${n}, 1fr)">`;
+  ["L", "R"].forEach(side => {
+    html += `<div class="rowlabel">${side} 側</div>`;
+    for (let s = 1; s <= n; s++) {
+      const r = run.filter(x => x.side === side && x.station === s).pop();
+      html += `<div class="cell" style="background:${r ? resultColor(r) : "#c9d1c6"}">${side}${s}<br>${r ? resultText(r) + (r.sprayed ? "・噴灑" : "") : "—"}</div>`;
+    }
+  });
+  box.innerHTML = html + `</div><p class="sub">${last.garden}｜${new Date(last.time).toLocaleString("zh-TW")}</p>`;
+}
+
+function drawTrend(sick) {
+  if (!window.Chart) return;
+  const bins = {};
+  sick.forEach(r => {
+    const d = new Date(r.time);
+    const k = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:00`;
+    bins[k] = (bins[k] || 0) + 1;
+  });
+  const labels = Object.keys(bins), values = Object.values(bins);
+  if (!chart) {
+    chart = new Chart($("trend"), {
+      type: "bar", data: { labels, datasets: [{ label: "病斑筆數", data: values, backgroundColor: COLORS.medium }] },
+      options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+    });
+  } else { chart.data.labels = labels; chart.data.datasets[0].data = values; chart.update(); }
+}
+
+function drawTable(data) {
+  const head = "<tr><th>時間</th><th>茶園</th><th>趟次</th><th>位置</th><th>結果</th><th>信心</th><th>3 張判讀</th><th>噴灑</th></tr>";
+  const body = [...data].reverse().slice(0, 200).map(r => `<tr>
+    <td>${new Date(r.time).toLocaleString("zh-TW")}</td><td>${r.garden || ""}</td><td>${r.trip || ""}</td>
+    <td>${r.side || ""}${r.station || ""}</td>
+    <td><span class="tag" style="background:${resultColor(r)}">${resultText(r)}</span></td>
+    <td>${r.confidence != null ? Math.round(r.confidence * 100) + "%" : "—"}</td>
+    <td>${(r.votes || []).join("、")}</td><td>${r.sprayed ? "是" : "否"}</td></tr>`).join("");
+  $("tbl").innerHTML = head + (body || '<tr><td colspan="8" class="sub">尚無資料</td></tr>');
+}
+
+$("gardenSel").onchange = render;
+$("csvBtn").onclick = () => {
+  const cols = ["time", "garden_id", "garden", "lat", "lng", "trip", "side", "station", "level", "severity", "confidence", "votes", "sprayed"];
+  const lines = [cols.join(",")].concat(rows().map(r => cols.map(c =>
+    c === "time" ? new Date(r.time).toISOString() : `"${String(Array.isArray(r[c]) ? r[c].join("/") : (r[c] ?? "")).replace(/"/g, '""')}"`).join(",")));
+  const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "茶園巡檢紀錄.csv"; a.click();
+};
+
+// ===================== 樹莓派狀態（/pi/<PI>） =====================
+function renderPi() {
+  const st = piStatus || {}, on = st.time && (Date.now() - st.time) / 1000 < PI_ONLINE_SEC && st.state !== "offline";
+  $("piDot").style.background = !piStatus ? "#9aa39a" : on ? (st.state === "inspecting" ? COLORS.medium : COLORS.none) : COLORS.high;
+  $("piState").textContent = !piStatus ? "尚未收到樹莓派資料" : on ? (PI_STATE[st.state] || st.state) : "離線";
+  $("piLabel").textContent = !piStatus ? "請確認樹莓派已開機、已連上網路" : (st.label || "");
+  $("piSeen").textContent = ago(st.time);
+  const today = all.filter(r => new Date(r.time).toDateString() === new Date().toDateString());
+  $("piToday").textContent = today.length;
+  $("piTodaySpray").textContent = today.filter(r => r.sprayed).length;
+  const last = all[all.length - 1], box = $("lastResult");
+  if (last) {
+    box.style.background = resultColor(last);
+    box.innerHTML = `<b>${last.side || ""}${last.station || ""}　${resultText(last)}${last.sprayed ? "・已噴灑" : ""}</b>` +
+      `<span>信心 ${Math.round((last.confidence || 0) * 100)}%｜${new Date(last.time).toLocaleTimeString("zh-TW")}</span>`;
+  }
+}
+
+// ===================== 巡檢車狀態（mBot2 → MQTT → 本網頁 → Firebase /mbot2） =====================
+const BUSY = ["scan", "moving"];
+function carOnline() { return carStatus && carStatus.time && (Date.now() - carStatus.time) / 1000 < CAR_ONLINE_SEC; }
+function sortedRuns() {
+  return Object.entries(carRuns).map(([id, r]) => ({ id, ...r })).sort((a, b) => (a.start || 0) - (b.start || 0));
+}
+function renderCar() {
+  const st = carStatus || {}, on = carOnline(), busy = on && BUSY.includes(st.state);
+  $("carDot").style.background = !carStatus ? "#9aa39a" : on ? (busy ? COLORS.medium : COLORS.none) : COLORS.high;
+  $("carState").textContent = !carStatus ? "尚未收到巡檢車資料" : on ? (CAR_STATE[st.state] || st.state) : "離線";
+  $("carLabel").textContent = on ? (st.label || "") : (carStatus ? "最後狀態：" + (CAR_STATE[st.state] || st.state) : "請確認 mBot2 已上網，且本網頁保持開著");
+  const total = st.total || 6, done = st.done || 0;
+  $("carBar").style.width = Math.min(100, 100 * done / total) + "%";
+  $("carProgress").textContent = `已巡檢 ${done} / ${total} 站`;
+  const cur = carRuns[st.run];
+  const from = cur && cur.start ? cur.start - 15e3 : null, to = cur && cur.end ? cur.end + 15e3 : Infinity;
+  $("carSpray").textContent = from ? all.filter(r => r.sprayed && r.time >= from && r.time <= to).length : 0;
+  $("carRuns").textContent = Object.keys(carRuns).length;
+  $("carSeen").textContent = ago(st.time);
+  $("btnStart").disabled = !on || busy || !mqReady();
+  $("btnStop").disabled = !on || !busy || !mqReady();
+  $("cmdNote").textContent = pendingCmd ? `已送出「${pendingCmd === "start" ? "開始巡檢" : "停止巡檢"}」，等待巡檢車接收（待命時約 2 秒，巡檢中於該站停車結束時）…` : "";
+  renderRunTable();
+}
+function renderRunTable() {
+  const head = "<tr><th>開始</th><th>結束</th><th>完成站數</th><th>噴灑次數</th><th>結果</th></tr>";
+  const body = sortedRuns().reverse().slice(0, 50).map(r => {
+    const from = (r.start || 0) - 15e3, to = r.end ? r.end + 15e3 : Infinity;
+    const sprays = all.filter(x => x.sprayed && x.time >= from && x.time <= to).length;
+    const done = r.done ?? Object.keys(r.stations || {}).length;
+    return `<tr><td>${r.start ? new Date(r.start).toLocaleString("zh-TW") : "—"}</td>
+      <td>${r.end ? new Date(r.end).toLocaleTimeString("zh-TW") : "進行中"}</td><td>${done}</td><td>${sprays}</td>
+      <td>${r.end ? (r.aborted ? "中止" : "完成") : "—"}</td></tr>`;
+  }).join("");
+  $("runTbl").innerHTML = head + (body || '<tr><td colspan="5" class="sub">尚無紀錄</td></tr>');
+}
+async function loadRuns() {
+  try {
+    const r = await fetch(`${CAR}/runs.json?orderBy=${encodeURIComponent('"$key"')}&limitToLast=30`).then(x => x.json());
+    carRuns = r && !r.error ? r : {};
+    renderCar();
+  } catch (e) { /* 下次再試 */ }
+}
+
+// Firebase 即時串流（瀏覽器內建 EventSource）
+function stream(url, onData) {
+  let es, retry = 0;
+  const open = () => {
+    es = new EventSource(url);
+    const handle = ev => { retry = 0; onData(JSON.parse(ev.data)); };
+    es.addEventListener("put", handle);
+    es.addEventListener("patch", handle);
+    es.addEventListener("cancel", () => { $("status").textContent = "Firebase 拒絕讀取：請檢查資料庫規則"; es.close(); });
+    es.onerror = () => { if (es.readyState === 2) setTimeout(open, Math.min(30000, 2000 * ++retry)); };
+  };
+  open();
+}
+function applyPut(obj, p) {
+  if (p.path === "/") return p.data;
+  return { ...(obj || {}), [p.path.slice(1)]: p.data };
+}
+
+// ===================== MQTT：接收 mBot2 回報並存進 Firebase、送出指令 =====================
+const mqReady = () => DEMO || (mq && mq.connected);
+function fbWrite(method, path, data) {
+  return fetch(`${CAR}${path}.json`, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) })
+    .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); })
+    .catch(e => { $("linkNote").textContent = "寫入 Firebase 失敗：" + e.message + "（檢查 mbot2 節點規則）"; });
+}
+function bridge(msg) {
+  if (msg.device && msg.device !== DEVICE) return;
+  const d = msg.data || {};
+  const now = Date.now();
+  if (msg.op === "status") { fbWrite("PUT", "/status", d); carStatus = { ...d, time: now }; }
+  else if (msg.op === "run_start") { fbWrite("PUT", `/runs/${d.run}`, d.info); carRuns[d.run] = { ...d.info, start: now }; }
+  else if (msg.op === "station") {
+    fbWrite("PATCH", "", { status: d.status, [`runs/${d.run}/stations/${d.key}`]: d.rec });
+    carStatus = { ...d.status, time: now };
+    if (pendingCmd === "start") pendingCmd = null;
+  } else if (msg.op === "run_end") {
+    const patch = { status: d.status };
+    Object.entries(d.end || {}).forEach(([k, v]) => patch[`runs/${d.run}/${k}`] = v);
+    fbWrite("PATCH", "", patch);
+    carStatus = { ...d.status, time: now };
+    if (carRuns[d.run]) Object.assign(carRuns[d.run], { ...d.end, end: now });
+    pendingCmd = null;
+  }
+  if (pendingCmd === "start" && carStatus && BUSY.includes(carStatus.state)) pendingCmd = null;
+  renderCar();
+}
+function startMqtt() {
+  const s = document.createElement("script");
+  s.src = "https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js";
+  s.onerror = () => { $("linkNote").textContent = "mqtt.js 載入失敗，請確認電腦有網路"; };
+  s.onload = () => {
+    mq = mqtt.connect(MQTT_URL, { clientId: "web-" + Math.random().toString(16).slice(2, 10), reconnectPeriod: 3000 });
+    mq.on("connect", () => {
+      mq.subscribe(`${TOPIC}/up`);
+      $("linkNote").textContent = "MQTT 已連線：巡檢時請保持本網頁開著，巡檢車資料才會存進 Firebase";
+      renderCar();
+    });
+    mq.on("message", (t, payload) => {
+      try { bridge(JSON.parse(new TextDecoder().decode(payload))); } catch (e) { console.warn(e); }
+    });
+    mq.on("reconnect", () => { $("linkNote").textContent = "MQTT 重新連線中…"; renderCar(); });
+    mq.on("error", e => { $("linkNote").textContent = "MQTT 錯誤：" + e.message; });
+  };
+  document.head.appendChild(s);
+}
+function sendCommand(action) {
+  pendingCmd = action; renderCar();
+  if (DEMO) { setTimeout(() => { pendingCmd = null; demoCommand(action); }, 1000); return; }
+  mq.publish(`${TOPIC}/cmd/${DEVICE}`, JSON.stringify({ action }));
+  setTimeout(() => { if (pendingCmd === action) { pendingCmd = null; renderCar(); } }, 20000);
+}
+$("btnStart").onclick = () => sendCommand("start");
+$("btnStop").onclick = () => sendCommand("stop");
+
+// ===================== 示範模式（網址加 ?demo） =====================
+let demoTimer = null;
+function demoInit() {
+  const now = Date.now();
+  gardens = { "MJ-A": { name: "名間松柏嶺A區", lat: 23.8341, lng: 120.6452 } };
+  const route = [["去程", "R", 1], ["去程", "R", 2], ["去程", "R", 3], ["回程", "L", 3], ["回程", "L", 2], ["回程", "L", 1]];
+  const lv = { R2: "low", L3: "high" };
+  [2, 1].forEach(h => route.forEach(([trip, side, st], i) => all.push(demoRec(now - h * 3600e3 + i * 9000, trip, side, st, lv[side + st] || "none"))));
+  carRuns = { r1: { start: now - 3600e3 - 15e3, end: now - 3600e3 + 60e3, done: 6, aborted: false } };
+  carStatus = { state: "idle", label: "待命", done: 0, total: 6, run: null, time: now };
+  piStatus = { state: "ready", label: "等待巡檢車出發", time: now };
+  setInterval(() => { carStatus.time = Date.now(); piStatus.time = Date.now(); render(); }, 5000);
+  load();
+}
+function demoRec(time, trip, side, station, sev) {
+  return { time, garden_id: "MJ-A", garden: "名間松柏嶺A區", lat: 23.8341, lng: 120.6452, trip, side, station,
+    level: { none: "0_healthy", low: "1_mild", medium: "2_moderate", high: "3_severe" }[sev],
+    severity: sev, confidence: 0.9, votes: Array(3).fill(LEVEL[sev]), sprayed: sev !== "none" };
+}
+function demoCommand(action) {
+  if (action === "start") {
+    const id = "r" + Date.now(), route = [["去程", "R", 1], ["去程", "R", 2], ["去程", "R", 3], ["回程", "L", 3], ["回程", "L", 2], ["回程", "L", 1]];
+    const lv = { R2: "medium", L3: "high" };
+    carRuns[id] = { start: Date.now() };
+    carStatus = { state: "scan", label: "起點準備", done: 0, total: 6, run: id, time: Date.now() };
+    let i = 0; render();
+    demoTimer = setInterval(() => {
+      const [trip, side, st] = route[i];
+      piStatus = { state: "inspecting", label: `${trip} ${side}${st}`, time: Date.now() };
+      all.push(demoRec(Date.now(), trip, side, st, lv[side + st] || "none"));
+      carStatus = { ...carStatus, state: "moving", done: i + 1, label: i < 5 ? `前往 ${route[i + 1][1]}${route[i + 1][2]}` : "返回起點", time: Date.now() };
+      if (++i === 6) {
+        clearInterval(demoTimer); demoTimer = null;
+        Object.assign(carRuns[id], { end: Date.now(), done: 6, aborted: false });
+        carStatus = { ...carStatus, state: "done", label: "巡檢完成" };
+        piStatus = { state: "ready", label: "已回到起點，等待下一趟", time: Date.now() };
+      }
+      render();
+    }, 2500);
+  } else if (action === "stop" && demoTimer) {
+    clearInterval(demoTimer); demoTimer = null;
+    Object.assign(carRuns[carStatus.run], { end: Date.now(), done: carStatus.done, aborted: true });
+    carStatus = { ...carStatus, state: "stopped", label: "已中止", time: Date.now() };
+    render();
+  }
+}
+
+// ===================== 啟動 =====================
+if (DEMO) {
+  demoInit();
+  $("linkNote").textContent = "示範模式：按「開始巡檢」看模擬過程";
+} else {
+  let piTimer = null;
+  stream(`${DB_URL}/pi/${PI}.json`, p => {
+    piStatus = applyPut(piStatus, p); renderPi();
+    clearTimeout(piTimer); piTimer = setTimeout(load, 1500);   // 樹莓派狀態改變時順便更新辨識結果
+  });
+  stream(`${CAR}/status.json`, p => { if (p.data !== null || p.path !== "/") { carStatus = applyPut(carStatus, p); renderCar(); } });
+  load(); loadRuns(); startMqtt();
+  setInterval(load, REFRESH_MS);
+  setInterval(loadRuns, 30000);
+  setInterval(() => { renderPi(); renderCar(); }, 5000);   // 更新「幾秒前」與離線判斷
+}
+</script>
+</body>
+</html>
