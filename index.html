@@ -128,7 +128,7 @@ const Q = new URLSearchParams(location.search);
 const DB_URL = Q.get("db") || "https://skhstest-8ffbd-default-rtdb.asia-southeast1.firebasedatabase.app";
 const DEVICE = Q.get("device") || "mbot2-01";         // 要和 mBot2 程式的 DEVICE 相同
 const PI = Q.get("pi") || "pi-01";                    // 要和樹莓派程式的 DEVICE 相同
-const MQTT_URL = Q.get("mqtt") || "wss://broker.hivemq.com:8884/mqtt";
+const MQTT_URL = Q.get("mqtt") || "wss://broker.emqx.io:8084/mqtt";
 const TOPIC = Q.get("topic") || "nttea/skjhs/mbot2";  // 要和 mBot2 程式的 TOPIC 相同
 const REFRESH_MS = 10000;
 const CAR_ONLINE_SEC = 45, PI_ONLINE_SEC = 60;        // 超過幾秒沒回報就顯示離線
